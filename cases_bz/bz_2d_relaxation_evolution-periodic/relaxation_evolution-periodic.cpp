@@ -11,7 +11,6 @@ using namespace SPH;
 Real LL = 1.0;					
 Real LH = 1.0;
 Real resolution_ref = LH / 50.0;
-Real BW = resolution_ref * 2.0;
 BoundingBox system_domain_bounds(Vec2d::Zero(), Vec2d(LL, LH));
 //----------------------------------------------------------------------
 //	Define geometries
@@ -38,9 +37,7 @@ int main(int ac, char *av[])
 	//----------------------------------------------------------------------
 	//	Creating body, materials and particles.
 	//----------------------------------------------------------------------
-	SolidBody body(sph_system, makeShared<Insert>("InsertedBody"));
-	/* Change the kernel function to the guass kernel function. */
-    //body.sph_adaptation_->resetKernel<KernelTabulated<KernelLaguerreGauss>>(20);
+	SolidBody body(sph_system, makeShared<Insert>("WaterBody"));
 	body.defineBodyLevelSetShape()->writeLevelSet(io_environment);
 	body.defineParticlesAndMaterial();
 	body.addBodyStateForRecording<Vecd>("Position");
@@ -69,9 +66,9 @@ int main(int ac, char *av[])
 		ReloadParticleIO write_particle_reload_files(io_environment, { &body });
 
 		/* Relaxation method: including 0th and 1st order consistency. */
-		InteractionDynamics<relax_dynamics::CalculateParticleStress> calculate_particle_stress(insert_body_inner, false);
 		relax_dynamics::RelaxationStepInner relaxation_0th_inner(insert_body_inner, false);
 		relax_dynamics::RelaxationStepImplicitInner relaxation_0th_implicit_inner(insert_body_inner, false);
+		InteractionDynamics<relax_dynamics::CalculateParticleStress> calculate_particle_stress(insert_body_inner, false);
 		relax_dynamics::RelaxationStepByStressInner relaxation_1st_inner(insert_body_inner, false);
 		relax_dynamics::RelaxationStepByStressImplicitInner relaxation_1st_implicit_inner(insert_body_inner, false);
 
@@ -141,8 +138,7 @@ int main(int ac, char *av[])
 		std::ofstream out_evolution_first_step(evolution_first_step.c_str(), std::ios::app);
 
 		/* The procedure to obtain uniform particle distribution that satisfies the 0th order consistency. */
-		while (current_zero_maximum_residual > 0.0001)
-		//while (current_zero_average_residual > 0.001 || current_zero_maximum_residual > 0.005)
+		while (current_zero_average_residual > 0.001)
 		{
 			periodic_condition_x.bounding_.exec();
 			periodic_condition_y.bounding_.exec();
@@ -151,9 +147,7 @@ int main(int ac, char *av[])
 			periodic_condition_y.update_cell_linked_list_.exec();
 			insert_body_inner.updateConfiguration();
 
-			// Zero order evolution procedure.
 			//relaxation_0th_implicit_inner.exec(0.1);
-			// First + zero order evolution procedure.
 			calculate_particle_stress.exec();
 			relaxation_1st_implicit_inner.exec(0.1);
 
