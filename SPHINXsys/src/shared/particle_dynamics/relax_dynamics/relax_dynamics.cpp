@@ -214,7 +214,7 @@ namespace SPH
 			surface_bounding_.exec();
 		}
 
-		/*THIS IS THE IMPLICIT SCHEME*/
+		/*THIS IS THE IMPLICIT SCHEME FOR RELAXATION*/
 
 		//=================================================================================================//
 		RelaxationImplicitInner::RelaxationImplicitInner(BaseInnerRelation& inner_relation)

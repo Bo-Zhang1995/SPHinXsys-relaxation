@@ -74,6 +74,8 @@ int main(int ac, char *av[])
 	//	Build up the environment of a SPHSystem.
 	//----------------------------------------------------------------------
 	SPHSystem sph_system(system_domain_bounds, resolution_ref);
+	sph_system.setRunParticleRelaxation(false);
+	sph_system.setReloadParticles(false);
 	/** Set the starting time. */
 	GlobalStaticVariables::physical_time_ = 0.0;
 	IOEnvironment io_environment(sph_system);
@@ -82,8 +84,153 @@ int main(int ac, char *av[])
 	//	Creating body, materials and particles.
 	//----------------------------------------------------------------------
 	EulerianFluidBody water_body(sph_system, makeShared<WaterBlock>("WaterBody"));
+	water_body.defineBodyLevelSetShape()->writeLevelSet(io_environment);
 	water_body.defineParticlesAndMaterial<CompressibleFluidParticles, CompressibleFluid>(rho0_f, heat_capacity_ratio, mu_f);
-	water_body.generateParticles<ParticleGeneratorLattice>();
+	water_body.addBodyStateForRecording<Vecd>("Position");
+	//reload the relaxated particle or generator the lattice particle.
+	(!sph_system.RunParticleRelaxation() && sph_system.ReloadParticles())
+		? water_body.generateParticles <ParticleGeneratorReload>(io_environment, water_body.getName())
+		: water_body.generateParticles<ParticleGeneratorLattice>();
+
+	//----------------------------------------------------------------------
+	//	Run particle relaxation for body-fitted distribution if chosen.
+	//----------------------------------------------------------------------
+	if (sph_system.RunParticleRelaxation())
+	{
+		//----------------------------------------------------------------------
+		//	Define body relation map used for particle relaxation.
+		//----------------------------------------------------------------------
+		InnerRelation water_body_inner(water_body);
+		//----------------------------------------------------------------------
+		//	Methods used for particle relaxation.
+		//----------------------------------------------------------------------
+		/** Random reset the insert body particle position. */
+		SimpleDynamics<RandomizeParticlePosition> random_insert_body_particles(water_body);
+		/** Write the body state to Vtp file. */
+		BodyStatesRecordingToVtp write_insert_body_to_vtp(io_environment, { &water_body });
+		/** Write the particle reload files. */
+		ReloadParticleIO write_particle_reload_files(io_environment, { &water_body });
+		/** A  Physics relaxation step. */
+		/* Relaxation method: including 0th and 1st order consistency. */
+		relax_dynamics::RelaxationStepInner relaxation_0th_inner(insert_body_inner, false);
+		relax_dynamics::RelaxationStepImplicitInner relaxation_0th_implicit_inner(insert_body_inner, false);
+		InteractionDynamics<relax_dynamics::CalculateParticleStress> calculate_particle_stress(insert_body_inner, false);
+		relax_dynamics::RelaxationStepByStressInner relaxation_1st_inner(insert_body_inner, false);
+		relax_dynamics::RelaxationStepByStressImplicitInner relaxation_1st_implicit_inner(insert_body_inner, false);
+		
+		/* Evolution method */
+		relax_dynamics::ZeroOrderEvolutionStep zero_order_evolution(insert_body_inner, false);
+		relax_dynamics::FirstOrderEvolutionStep first_order_evolution(insert_body_inner, false);
+		InteractionSplit<relax_dynamics::CorrectionMatrixRegularization> correction_matrix_regularization(insert_body_inner);
+
+		/** Periodic BCs in x direction. */
+		PeriodicConditionUsingCellLinkedList periodic_condition_x(water_body, water_body.getBodyShapeBounds(), xAxis);
+		/** Periodic BCs in y direction. */
+		PeriodicConditionUsingCellLinkedList periodic_condition_y(water_body, water_body.getBodyShapeBounds(), yAxis);
+		
+		/* Update relaxation residue. */
+		InteractionDynamics<relax_dynamics::CheckCorrectedZeroOrderConsistency> check_corrected_zero_order_consistency(insert_body_inner);
+		ReduceAverage<QuantitySummation<Real>> calculate_particle_average_zero_error(body, "corrected_zero_order_error");
+		ReduceDynamics<QuantityMaximum<Real>> calculate_particle_maximum_zero_error(body, "corrected_zero_order_error");
+		InteractionDynamics<relax_dynamics::CheckCorrectedFirstOrderConsistency> check_corrected_first_order_consistency(insert_body_inner);
+		ReduceAverage<QuantitySummation<Real>> calculate_particle_average_first_error(body, "corrected_first_order_error");
+		ReduceDynamics<QuantityMaximum<Real>> calculate_particle_maximum_first_error(body, "corrected_first_order_error");
+		//----------------------------------------------------------------------
+		//	Particle relaxation starts here.
+		//----------------------------------------------------------------------
+		random_insert_body_particles.exec(0.25);
+		sph_system.initializeSystemCellLinkedLists();
+		periodic_condition_x.update_cell_linked_list_.exec();
+		periodic_condition_y.update_cell_linked_list_.exec();
+		sph_system.initializeSystemConfigurations();
+		write_insert_body_to_vtp.writeToFile(0);
+		//----------------------------------------------------------------------
+		//	Relax particles of the insert body.
+		//----------------------------------------------------------------------
+		TickCount t1 = TickCount::now();
+
+		int ite = 0; //iteration step for the total relaxation step.
+		int ite_p = 0; //iteration step for the 0th order relaxation step.
+		int ite_s = 0; //iteration step for the 1st order relaxation step.
+		int ite_loop = 0; //iteration loop for the whole relaxation process.
+
+		Real last_zero_maximum_residual = 1;
+		Real last_zero_average_residual = 1;
+		Real last_first_maximum_residual = 1;
+		Real last_first_average_residual = 1;
+
+		Real current_zero_maximum_residual = 1; //maximum zero order consistency residual.
+		Real current_zero_average_residual = 1; //average zero order consistency residual.
+		Real current_first_maximum_residual = 1; //maximum first order consistency residual.
+		Real current_first_average_residual = 1; //average first order consistency residual.
+
+		GlobalStaticVariables::physical_time_ = ite;
+
+		std::string average_zero_error = io_environment.output_folder_ + "/" + "average_zero_error.dat";
+		std::ofstream out_average_zero_error(average_zero_error.c_str(), std::ios::app);
+
+		std::string maximum_zero_error = io_environment.output_folder_ + "/" + "maximum_zero_error.dat";
+		std::ofstream out_maximum_zero_error(maximum_zero_error.c_str(), std::ios::app);
+
+		std::string average_first_error = io_environment.output_folder_ + "/" + "average_first_error.dat";
+		std::ofstream out_average_first_error(average_first_error.c_str(), std::ios::app);
+
+		std::string maximum_first_error = io_environment.output_folder_ + "/" + "maximum_first_error.dat";
+		std::ofstream out_maximum_first_error(maximum_first_error.c_str(), std::ios::app);
+
+		std::string evolution_zero_step = io_environment.output_folder_ + "/" + "evolution_zero_step.dat";
+		std::ofstream out_evolution_zero_step(evolution_zero_step.c_str(), std::ios::app);
+
+		std::string evolution_first_step = io_environment.output_folder_ + "/" + "evolution_first_step.dat";
+		std::ofstream out_evolution_first_step(evolution_first_step.c_str(), std::ios::app);
+
+		/* The procedure to obtain uniform particle distribution that satisfies the 0th order consistency. */
+		while (current_zero_maximum_residual > 0.0001)
+		{
+			periodic_condition_x.bounding_.exec();
+			periodic_condition_y.bounding_.exec();
+			body.updateCellLinkedList();
+			periodic_condition_x.update_cell_linked_list_.exec();
+			periodic_condition_y.update_cell_linked_list_.exec();
+			insert_body_inner.updateConfiguration();
+
+			//relaxation_0th_implicit_inner.exec(0.1);
+			calculate_particle_stress.exec();
+			relaxation_1st_implicit_inner.exec(0.1);
+
+			ite++;
+
+			if (ite % 100 == 0)
+			{
+				check_corrected_zero_order_consistency.exec();
+				current_zero_average_residual = calculate_particle_average_zero_error.exec();
+				current_zero_maximum_residual = calculate_particle_maximum_zero_error.exec();
+
+				std::cout << std::fixed << std::setprecision(9) << "0th relaxation steps for the body N = " << ite << "\n";
+				std::cout << "$$ The 0th consistency error: maximum = " << current_zero_maximum_residual << "; average = " << current_zero_average_residual << std::endl;
+				write_insert_body_to_vtp.writeToFile(ite);
+			}
+		}
+		check_corrected_zero_order_consistency.exec();
+		current_zero_average_residual = calculate_particle_average_zero_error.exec();
+		current_zero_maximum_residual = calculate_particle_maximum_zero_error.exec();
+		std::cout << "@The 0th consistency error: maximum = " << current_zero_maximum_residual << "; average = " << current_zero_average_residual << std::endl;
+
+		ite++;
+		write_insert_body_to_vtp.writeToFile(ite);
+	
+		std::cout << "The final 0th error: maximum = " << current_zero_maximum_residual << "; average = " << current_zero_average_residual << std::endl;
+		std::cout << "The final 1st error: maximum = " << current_first_maximum_residual << "; average = " << current_first_average_residual << std::endl;
+		std::cout << "The physical relaxation process of body finish !" << std::endl;
+
+		/* Output results. */
+		write_particle_reload_files.writeToFile(0);
+		TickCount t2 = TickCount::now();
+		TickCount::interval_t tt;
+		tt = t2 - t1;
+		std::cout << "Total wall time for computation: " << tt.seconds() << " seconds." << std::endl;
+		return 0;
+	}
 	//----------------------------------------------------------------------
 	//	Define body relation map.
 	//	The contact map gives the topological connections between the bodies.
