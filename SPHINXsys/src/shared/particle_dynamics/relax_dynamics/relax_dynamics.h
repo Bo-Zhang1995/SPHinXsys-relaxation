@@ -10,7 +10,7 @@
  *																			*
  * SPHinXsys is partially funded by German Research Foundation				*
  * (Deutsche Forschungsgemeinschaft) DFG HU1527/6-1, HU1527/10-1,			*
- *  HU1527/12-1 and HU1527/12-4													*
+ *  HU1527/12-1 and HU1527/12-4												*
  *                                                                          *
  * Portions copyright (c) 2017-2022 Technical University of Munich and		*
  * the authors' affiliations.												*
@@ -413,13 +413,13 @@ namespace SPH
 			virtual ErrorAndParameters<Vecd, Matd, Matd> computeErrorAndParameters(size_t index_i, Real dt = 0.0);
 			virtual void updateStates(size_t index_i, Real dt, const ErrorAndParameters<Vecd, Matd, Matd>& error_and_parameters);
 			
-			Real target_error_x_;
-			Real target_error_y_;
-			Real target_error_;
+			Real target_error_p_x_;
+			Real target_error_p_y_;
+			Real target_error_p_;
 
-			StdLargeVec<Real> error_x_;
-			StdLargeVec<Real> error_y_;
-			StdLargeVec<Real> error_;
+			StdLargeVec<Real> error_p_x_;
+			StdLargeVec<Real> error_p_y_;
+			StdLargeVec<Real> error_p_;
 			
 			Kernel* kernel_;
 			StdLargeVec<Real>& Vol_;
@@ -431,9 +431,9 @@ namespace SPH
 		public:
 			inline void updateTargetError(Real target_error_x, Real target_error_y, Real target_error)
 			{
-				target_error_x_ = target_error_x;
-				target_error_y_ = target_error_y;
-				target_error_ = target_error;
+				target_error_p_x_ = target_error_x;
+				target_error_p_y_ = target_error_y;
+				target_error_p_ = target_error;
 			}
 		};
 
@@ -464,9 +464,9 @@ namespace SPH
 			virtual void exec(Real dt = 0.0) override;
 
 		protected:
-			Real target_error_x_;
-			Real target_error_y_;
-			Real target_error_;
+			Real target_error_p_x_;
+			Real target_error_p_y_;
+			Real target_error_p_;
 
 			Real time_step_size_;
 			RealBody* real_body_;
@@ -497,8 +497,13 @@ namespace SPH
 			virtual ErrorAndParameters<Vecd, Matd, Matd> computeErrorAndParameters(size_t index_i, Real dt = 0.0);
 			virtual void updateStates(size_t index_i, Real dt, const ErrorAndParameters<Vecd, Matd, Matd>& error_and_parameters);
 
-			Real target_error_;
-			Real constrained_distance_;
+			Real target_error_s_x_;
+			Real target_error_s_y_;
+			Real target_error_s_;
+
+			StdLargeVec<Real> error_s_x_;
+			StdLargeVec<Real> error_s_y_;
+			StdLargeVec<Real> error_s_;
 
 			Kernel* kernel_;
 			StdLargeVec<Real>& Vol_;
@@ -509,7 +514,12 @@ namespace SPH
 			SPHAdaptation* sph_adaptation_;
 
 		public:
-			inline void updateTargetError(Real target_error) { target_error_ = target_error; }
+			inline void updateTargetError(Real target_error_x, Real target_error_y, Real target_error) 
+			{
+				target_error_s_x_ = target_error_x;
+				target_error_s_y_ = target_error_y;
+				target_error_s_ = target_error;
+			}
 		};
 
 		/**
@@ -539,7 +549,10 @@ namespace SPH
 			virtual void exec(Real dt = 0.0) override;
 
 		protected:
-			Real target_error_;
+			Real target_error_s_x_;
+			Real target_error_s_y_;
+			Real target_error_s_;
+
 			Real time_step_size_;
 			RealBody* real_body_;
 			BaseInnerRelation& inner_relation_;
@@ -548,6 +561,9 @@ namespace SPH
 			InteractionSplit<RelaxationByStressImplicitInner> relaxation_evolution_inner_;
 			SimpleDynamics<ShapeSurfaceBounding> surface_bounding_;
 			SimpleDynamics<NearSurfaceVolumeCorrection> surface_correction_;
+
+			ReduceDynamics<QuantityMaximum<Real>> update_averaged_error_x_;
+			ReduceDynamics<QuantityMaximum<Real>> update_averaged_error_y_;
 			ReduceDynamics<QuantityMaximum<Real>> update_averaged_error_;
 		};
 

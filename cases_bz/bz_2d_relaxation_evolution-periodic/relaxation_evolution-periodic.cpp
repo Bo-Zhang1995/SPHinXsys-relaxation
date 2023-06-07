@@ -138,7 +138,7 @@ int main(int ac, char *av[])
 		std::ofstream out_evolution_first_step(evolution_first_step.c_str(), std::ios::app);
 
 		/* The procedure to obtain uniform particle distribution that satisfies the 0th order consistency. */
-		while (current_zero_average_residual > 0.001)
+		while (current_zero_maximum_residual > 0.0001)
 		{
 			periodic_condition_x.bounding_.exec();
 			periodic_condition_y.bounding_.exec();

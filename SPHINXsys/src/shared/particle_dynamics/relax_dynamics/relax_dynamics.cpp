@@ -214,13 +214,13 @@ namespace SPH
 			surface_bounding_.exec();
 		}
 
-		/*THIS IS THE IMPLICIT PART*/
+		/*THIS IS THE IMPLICIT SCHEME*/
 
 		//=================================================================================================//
 		RelaxationImplicitInner::RelaxationImplicitInner(BaseInnerRelation& inner_relation)
 			: LocalDynamics(inner_relation.getSPHBody()), RelaxDataDelegateInner(inner_relation),
 			kernel_(inner_relation.getSPHBody().sph_adaptation_->getKernel()),
-			target_error_x_(1.0), target_error_y_(1.0), target_error_(1.0),
+			target_error_p_x_(1.0), target_error_p_y_(1.0), target_error_p_(1.0),
 			Vol_(particles_->Vol_), pos_(particles_->pos_), acc_(particles_->acc_),
 			sph_adaptation_(sph_body_.sph_adaptation_)	
 		{
@@ -229,12 +229,12 @@ namespace SPH
 			particles_->addVariableToWrite<Real>("VolumetricMeasure");
 			level_set_shape_ = DynamicCast<LevelSetShape>(this, sph_body_.body_shape_);
 
-			particles_->registerVariable(error_x_, "error_x_");
-			particles_->registerVariable(error_y_, "error_y_");
-			particles_->registerVariable(error_, "error_");
-			particles_->addVariableToWrite<Real>("error_x_");
-			particles_->addVariableToWrite<Real>("error_y_");
-			particles_->addVariableToWrite<Real>("error_");
+			particles_->registerVariable(error_p_x_, "error_p_x_");
+			particles_->registerVariable(error_p_y_, "error_p_y_");
+			particles_->registerVariable(error_p_, "error_p_");
+			particles_->addVariableToWrite<Real>("error_p_x_");
+			particles_->addVariableToWrite<Real>("error_p_y_");
+			particles_->addVariableToWrite<Real>("error_p_");
 		};
 		//=================================================================================================//
 		ErrorAndParameters<Vecd, Matd, Matd> RelaxationImplicitInner::computeErrorAndParameters(size_t index_i, Real dt)
@@ -254,26 +254,6 @@ namespace SPH
 			}
 
 			Matd evolution = Matd::Identity();
-
-			//for (size_t i = 0; i != error_and_parameters.error_.size(); ++i)
-			//{
-			//	if (error_and_parameters.error_[i] > 0.0002 * dt * dt)
-			//	{
-			//		error_and_parameters.error_[i] -= 0.0002 * dt * dt;
-			//	}
-			//	else if (error_and_parameters.error_[i] < -0.0002 * dt * dt)
-			//	{
-			//		error_and_parameters.error_[i] += 0.0002 * dt * dt;
-			//	}
-			//	else if (error_and_parameters.error_[i] > 0 && error_and_parameters.error_[i] < 0.0002 * dt * dt)
-			//	{
-			//		error_and_parameters.error_[i] = 0.0002 * dt * dt;
-			//	}
-			//	else if (error_and_parameters.error_[i] < 0 && error_and_parameters.error_[1] > -0.0002 * dt * dt)
-			//	{
-			//		error_and_parameters.error_[i] = -0.0002 * dt * dt;
-			//	}
-			//}
 			error_and_parameters.a_ -= evolution;
 			return error_and_parameters;
 		}
@@ -284,11 +264,7 @@ namespace SPH
 			Matd parameter_l = error_and_parameters.a_ * error_and_parameters.a_ + error_and_parameters.c_;
 			Vecd parameter_k = parameter_l.inverse() * error_and_parameters.error_;
 
-			parameter_k =  parameter_k * error_and_parameters.error_.norm() / target_error_;
-			//parameter_k[0] *= error_and_parameters.error_[0] / target_error_x_;
-			//parameter_k[1] *= error_and_parameters.error_[1] / target_error_y_;
-
-			//Mat2d scale_matrix_{ {abs(error_and_parameters.error_[0]) / target_error_x_, 0}, {0, abs(error_and_parameters.error_[1]) / target_error_y_} };
+			parameter_k = parameter_k * error_and_parameters.error_.norm() / target_error_p_;
 			pos_[index_i] += error_and_parameters.a_ * parameter_k;
 
 			Neighborhood& inner_neighborhood = inner_configuration_[index_i];
@@ -308,9 +284,9 @@ namespace SPH
 			acc_[index_i] = -error_and_parameters.error_ / dt / dt;
 			implicit_residue_p_[index_i] = (error_and_parameters.error_ / dt / dt).norm();
 
-			error_[index_i] = error_and_parameters.error_.norm();
-			error_x_[index_i] = abs(error_and_parameters.error_[0]);
-			error_y_[index_i] = abs(error_and_parameters.error_[1]);
+			error_p_[index_i] = error_and_parameters.error_.norm();
+			error_p_x_[index_i] = abs(error_and_parameters.error_[0]);
+			error_p_y_[index_i] = abs(error_and_parameters.error_[1]);
 		}
 		//=================================================================================================//
 		RelaxationImplicitInnerWithLevelSetCorrection::
@@ -331,13 +307,13 @@ namespace SPH
 		RelaxationStepImplicitInner::RelaxationStepImplicitInner(BaseInnerRelation& inner_relation, bool level_set_correction)
 			: BaseDynamics<void>(inner_relation.getSPHBody()), real_body_(inner_relation.real_body_),
 			inner_relation_(inner_relation), time_step_size_(0.01),
-			target_error_x_(1.0), target_error_y_(1.0), target_error_(1.0),
+			target_error_p_x_(1.0), target_error_p_y_(1.0), target_error_p_(1.0),
 			near_shape_surface_(*real_body_), get_time_step_(*real_body_),
 			relaxation_evolution_inner_(inner_relation), surface_bounding_(near_shape_surface_), 
 			surface_correction_(near_shape_surface_),
-			update_averaged_error_x_(inner_relation.getSPHBody(), "error_x_"),
-			update_averaged_error_y_(inner_relation.getSPHBody(), "error_y_"),
-			update_averaged_error_(inner_relation.getSPHBody(), "error_"){}
+			update_averaged_error_x_(inner_relation.getSPHBody(), "error_p_x_"),
+			update_averaged_error_y_(inner_relation.getSPHBody(), "error_p_y_"),
+			update_averaged_error_(inner_relation.getSPHBody(), "error_p_"){}
 		//=================================================================================================//
 		void RelaxationStepImplicitInner::exec(Real dt)
 		{
@@ -347,23 +323,30 @@ namespace SPH
 			time_step_size_ = 20 * sqrt(get_time_step_.exec());
 			//surface_correction_.exec(); 
 			//surface_bounding_.exec();
-			target_error_ = update_averaged_error_.exec();
-			target_error_x_ = update_averaged_error_x_.exec();
-			target_error_y_ = update_averaged_error_y_.exec();
-			relaxation_evolution_inner_.updateTargetError(target_error_x_, target_error_y_, target_error_);
+			target_error_p_ = update_averaged_error_.exec();
+			target_error_p_x_ = update_averaged_error_x_.exec();
+			target_error_p_y_ = update_averaged_error_y_.exec();
+			relaxation_evolution_inner_.updateTargetError(target_error_p_x_, target_error_p_y_, target_error_p_);
 		}
 		//=================================================================================================//
 		RelaxationByStressImplicitInner::RelaxationByStressImplicitInner(BaseInnerRelation& inner_relation)
 			: LocalDynamics(inner_relation.getSPHBody()), RelaxDataDelegateInner(inner_relation),
-			kernel_(inner_relation.getSPHBody().sph_adaptation_->getKernel()), target_error_(1.0),
+			kernel_(inner_relation.getSPHBody().sph_adaptation_->getKernel()), 
+			target_error_s_x_(1.0), target_error_s_y_(1.0), target_error_s_(1.0),
 			Vol_(particles_->Vol_), pos_(particles_->pos_), acc_(particles_->acc_),
-			constrained_distance_(0.5 * sph_body_.sph_adaptation_->MinimumSpacing()),
 			B_(*particles_->template getVariableByName<Matd>("CorrectionMatrix")),
 			sph_adaptation_(sph_body_.sph_adaptation_)
 		{
 			particles_->registerVariable(implicit_residue_s_, "implicit_residue_s_");
 			particles_->addVariableToWrite<Real>("implicit_residue_s_");
 			level_set_shape_ = DynamicCast<LevelSetShape>(this, sph_body_.body_shape_);
+
+			particles_->registerVariable(error_s_x_, "error_s_x_");
+			particles_->registerVariable(error_s_y_, "error_s_y_");
+			particles_->registerVariable(error_s_, "error_s_");
+			particles_->addVariableToWrite<Real>("error_s_x_");
+			particles_->addVariableToWrite<Real>("error_s_y_");
+			particles_->addVariableToWrite<Real>("error_s_");
 		};
 		//=================================================================================================//
 		ErrorAndParameters<Vecd, Matd, Matd> RelaxationByStressImplicitInner::computeErrorAndParameters(size_t index_i, Real dt)
@@ -392,6 +375,8 @@ namespace SPH
 		{
 			Matd parameter_l = error_and_parameters.a_ * error_and_parameters.a_ + error_and_parameters.c_;
 			Vecd parameter_k = parameter_l.inverse() * error_and_parameters.error_;
+
+			//parameter_k = parameter_k * error_and_parameters.error_.norm() / target_error_s_;
 			pos_[index_i] += error_and_parameters.a_ * parameter_k;
 
 			Neighborhood& inner_neighborhood = inner_configuration_[index_i];
@@ -410,6 +395,10 @@ namespace SPH
 			updateStates(index_i, dt, error_and_parameters);
 			acc_[index_i] = - error_and_parameters.error_ / dt / dt;
 			implicit_residue_s_[index_i] = (error_and_parameters.error_ / dt / dt).norm();
+
+			error_s_[index_i] = error_and_parameters.error_.norm();
+			error_s_x_[index_i] = abs(error_and_parameters.error_[0]);
+			error_s_y_[index_i] = abs(error_and_parameters.error_[1]);
 		}
 		//=================================================================================================//
 		RelaxationByStressImplicitInnerWithLevelSetCorrection::
@@ -430,11 +419,14 @@ namespace SPH
 		//=================================================================================================//
 		RelaxationStepByStressImplicitInner::RelaxationStepByStressImplicitInner(BaseInnerRelation& inner_relation, bool level_set_correction)
 			: BaseDynamics<void>(inner_relation.getSPHBody()), real_body_(inner_relation.real_body_),
-			inner_relation_(inner_relation), target_error_(0.0), time_step_size_(0.001),
+			inner_relation_(inner_relation), time_step_size_(0.01),
+			target_error_s_x_(1.0), target_error_s_y_(1.0), target_error_s_(1.0),
 			near_shape_surface_(*real_body_), get_time_step_(*real_body_),
-			relaxation_evolution_inner_(inner_relation),
-			surface_bounding_(near_shape_surface_), surface_correction_(near_shape_surface_),
-			update_averaged_error_(inner_relation.getSPHBody(), "implicit_residue_s_") {}
+			relaxation_evolution_inner_(inner_relation), surface_bounding_(near_shape_surface_),
+			surface_correction_(near_shape_surface_),
+			update_averaged_error_x_(inner_relation.getSPHBody(), "error_s_x_"),
+			update_averaged_error_y_(inner_relation.getSPHBody(), "error_s_y_"),
+			update_averaged_error_(inner_relation.getSPHBody(), "error_s_") {};
 		//=================================================================================================//
 		void RelaxationStepByStressImplicitInner::exec(Real dt)
 		{
@@ -444,8 +436,10 @@ namespace SPH
 			//time_step_size_ = 50 * sqrt(get_time_step_.exec());
 			//surface_correction_.exec();
 			//surface_bounding_.exec();
-			target_error_ = update_averaged_error_.exec();
-			relaxation_evolution_inner_.updateTargetError(target_error_);
+			target_error_s_ = update_averaged_error_.exec();
+			target_error_s_x_ = update_averaged_error_x_.exec();
+			target_error_s_y_ = update_averaged_error_y_.exec();
+			relaxation_evolution_inner_.updateTargetError(target_error_s_x_, target_error_s_y_, target_error_s_);
 		}
 		//=================================================================================================//
 		CalculateParticleVolume::CalculateParticleVolume(BaseInnerRelation& inner_relation)
